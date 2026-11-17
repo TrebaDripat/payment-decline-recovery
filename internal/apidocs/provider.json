@@ -1,0 +1,328 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Synthetic Payment Provider API",
+    "version": "0.2.0",
+    "description": "Independent simulator, not a real payment provider. No authentication; keep on loopback or a trusted private network. Its database must be separate from the engine and retained across restarts."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8090"
+    }
+  ],
+  "paths": {
+    "/recoveries": {
+      "post": {
+        "operationId": "recover",
+        "summary": "Commit or replay one synthetic effect for a stable key",
+        "description": "Strict JSON object, at most 4096 bytes. A retained key is tied to one invoice and immutable receipt. The simulator retains receipts indefinitely. Fault modes may drop or delay the response after commit: lack of a successful response does not prove lack of an effect. Reconcile by lookup.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New or replayed immutable receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or oversized request",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Key belongs to another invoice",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Injected permanent rejection before acceptance",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Injected rate limit before acceptance",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Delay in seconds; simulator returns 2.",
+                "schema": {
+                  "type": "string",
+                  "const": "2"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Fault injection unavailable; effect may have been committed",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage failure or injected unavailability; engine treats outcome as unknown",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recoveries/{key}": {
+      "get": {
+        "operationId": "lookup",
+        "summary": "Authoritatively look up a persisted receipt",
+        "description": "For this simulator only, 404 means no committed receipt for this key. The invoice ID must match. Lookup is unaffected by POST fault injection. Never generalize this guarantee to a provider with eventual consistency or expiring keys.",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          },
+          {
+            "name": "invoice_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identity",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No receipt exists for this key",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Key belongs to another invoice",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider storage unavailable",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/snapshot": {
+      "get": {
+        "operationId": "providerSnapshot",
+        "summary": "Count actual effects in the independent simulator database",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "provider_effects"
+                  ],
+                  "properties": {
+                    "provider_effects": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "providerOpenapi",
+        "summary": "Read this embedded provider contract",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Identifier": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9_-]{1,96}$",
+        "minLength": 1,
+        "maxLength": 96
+      },
+      "Receipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attempt_id",
+          "status"
+        ],
+        "properties": {
+          "attempt_id": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "failed",
+              "succeeded"
+            ]
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "failed"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "code"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "insufficient_funds",
+                    "do_not_honor",
+                    "lost_card"
+                  ]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "code": {
+                  "const": ""
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RecoveryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotency_key",
+          "invoice_id"
+        ],
+        "properties": {
+          "idempotency_key": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "invoice_id": {
+            "$ref": "#/components/schemas/Identifier"
+          }
+        }
+      }
+    }
+  }
+}

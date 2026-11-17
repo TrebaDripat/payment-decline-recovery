@@ -60,7 +60,7 @@ func TestDeliveryAndAttemptDeduplication(t *testing.T) {
 	ingest(t, s, e)
 	for i := 0; i < 20; i++ {
 		duplicate, err := s.Ingest(ctx, e, start)
-		if err != nil || !duplicate {
+		if err != nil || !duplicate.DuplicateDelivery {
 			t.Fatalf("duplicate=%v err=%v", duplicate, err)
 		}
 	}
@@ -71,7 +71,7 @@ func TestDeliveryAndAttemptDeduplication(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 }
-func TestConflictingEventsRollback(t *testing.T) {
+func TestConflictingEventsPreserveBusinessOutcomes(t *testing.T) {
 	for _, kind := range []string{"same-delivery-new-payload", "same-attempt-new-invoice", "same-attempt-new-outcome", "unknown-attempt-existing-invoice"} {
 		t.Run(kind, func(t *testing.T) {
 			s := testStore(t)
@@ -91,8 +91,8 @@ func TestConflictingEventsRollback(t *testing.T) {
 				e.EventID = "other"
 				e.AttemptID = "unknown"
 			}
-			if _, err := s.Ingest(ctx, e, start); !errors.Is(err, ErrConflict) {
-				t.Fatalf("expected conflict, got %v", err)
+			if result, err := s.Ingest(ctx, e, start); err != nil || result.Status != "needs_review" {
+				t.Fatalf("expected persisted review, got %+v %v", result, err)
 			}
 			v := snapshot(t, s)
 			if v.Events != 1 || v.Attempts != 1 || v.Jobs != 1 || len(v.Invoices) != 1 {
@@ -185,6 +185,8 @@ func TestRetryBudgetAndSchedule(t *testing.T) {
 }
 
 type ambiguousGateway struct{ g SimulatedGateway }
+
+func (g ambiguousGateway) Lookup(c context.Context, j Job) (Receipt, error) { return g.g.Lookup(c, j) }
 
 func (g ambiguousGateway) Recover(c context.Context, j Job) (Receipt, error) {
 	_, err := g.g.Recover(c, j)

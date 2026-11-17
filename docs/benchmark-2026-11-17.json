@@ -1,0 +1,152 @@
+{
+  "synthetic": true,
+  "started_at_utc": "2026-11-17T17:31:09.569209+00:00",
+  "environment": {
+    "os": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "python": "3.12.14",
+    "logical_cpus": 5,
+    "binary_sha256": "8bac6a95e00712ea9e7400bda8253581d2aa50fbc709f99b2048dfac1c0209ea",
+    "git_revision": "a197ab382defcaac6105b17d297afd438dce14ff",
+    "working_tree_dirty": true,
+    "cpu_quota": "400000 100000",
+    "memory_limit": "17179869184",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor"
+  },
+  "methodology": "loopback HTTP; fresh SQLite files per run; initial due times advanced; CLI workers unchanged; startup and 50 ms completion polling included",
+  "configuration": {
+    "invoices": 40,
+    "deliveries_per_invoice": 3,
+    "client_concurrency": 8,
+    "workers": [
+      1,
+      4
+    ],
+    "runs": 3
+  },
+  "samples": [
+    {
+      "run": 1,
+      "workers": 1,
+      "invoices": 40,
+      "webhook_requests": 120,
+      "redeliveries": 80,
+      "ingestion_seconds": 0.11996,
+      "webhook_requests_per_second": 1000.333,
+      "webhook_latency_ms": {
+        "p50": 5.604,
+        "p95": 18.018,
+        "maximum": 39.018
+      },
+      "recovery_seconds": 10.025434,
+      "recovered_invoices_per_second": 3.99,
+      "provider_effects": 40,
+      "payment_attempts": 80,
+      "pending_jobs": 0,
+      "invariants": "passed"
+    },
+    {
+      "run": 1,
+      "workers": 4,
+      "invoices": 40,
+      "webhook_requests": 120,
+      "redeliveries": 80,
+      "ingestion_seconds": 0.091813,
+      "webhook_requests_per_second": 1307.001,
+      "webhook_latency_ms": {
+        "p50": 4.421,
+        "p95": 14.962,
+        "maximum": 17.504
+      },
+      "recovery_seconds": 2.523015,
+      "recovered_invoices_per_second": 15.854,
+      "provider_effects": 40,
+      "payment_attempts": 80,
+      "pending_jobs": 0,
+      "invariants": "passed"
+    },
+    {
+      "run": 2,
+      "workers": 1,
+      "invoices": 40,
+      "webhook_requests": 120,
+      "redeliveries": 80,
+      "ingestion_seconds": 0.13507,
+      "webhook_requests_per_second": 888.428,
+      "webhook_latency_ms": {
+        "p50": 5.052,
+        "p95": 22.987,
+        "maximum": 34.35
+      },
+      "recovery_seconds": 10.035774,
+      "recovered_invoices_per_second": 3.986,
+      "provider_effects": 40,
+      "payment_attempts": 80,
+      "pending_jobs": 0,
+      "invariants": "passed"
+    },
+    {
+      "run": 2,
+      "workers": 4,
+      "invoices": 40,
+      "webhook_requests": 120,
+      "redeliveries": 80,
+      "ingestion_seconds": 0.087789,
+      "webhook_requests_per_second": 1366.908,
+      "webhook_latency_ms": {
+        "p50": 3.926,
+        "p95": 13.378,
+        "maximum": 31.962
+      },
+      "recovery_seconds": 2.53917,
+      "recovered_invoices_per_second": 15.753,
+      "provider_effects": 40,
+      "payment_attempts": 80,
+      "pending_jobs": 0,
+      "invariants": "passed"
+    },
+    {
+      "run": 3,
+      "workers": 1,
+      "invoices": 40,
+      "webhook_requests": 120,
+      "redeliveries": 80,
+      "ingestion_seconds": 0.084374,
+      "webhook_requests_per_second": 1422.231,
+      "webhook_latency_ms": {
+        "p50": 3.935,
+        "p95": 12.047,
+        "maximum": 19.506
+      },
+      "recovery_seconds": 10.026492,
+      "recovered_invoices_per_second": 3.989,
+      "provider_effects": 40,
+      "payment_attempts": 80,
+      "pending_jobs": 0,
+      "invariants": "passed"
+    },
+    {
+      "run": 3,
+      "workers": 4,
+      "invoices": 40,
+      "webhook_requests": 120,
+      "redeliveries": 80,
+      "ingestion_seconds": 0.0976,
+      "webhook_requests_per_second": 1229.505,
+      "webhook_latency_ms": {
+        "p50": 4.388,
+        "p95": 14.96,
+        "maximum": 34.15
+      },
+      "recovery_seconds": 2.540684,
+      "recovered_invoices_per_second": 15.744,
+      "provider_effects": 40,
+      "payment_attempts": 80,
+      "pending_jobs": 0,
+      "invariants": "passed"
+    }
+  ],
+  "median_recovered_invoices_per_second": {
+    "1": 3.989,
+    "4": 15.753
+  }
+}

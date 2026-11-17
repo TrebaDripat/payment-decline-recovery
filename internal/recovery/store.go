@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -22,6 +21,7 @@ var identifier = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,96}$`)
 
 const MaxRetries = 3
 const LeaseDuration = 30 * time.Second
+const ResolutionWindow = 15 * time.Minute
 
 type Event struct {
 	EventID   string `json:"event_id"`
@@ -48,6 +48,8 @@ type Store struct{ db *sql.DB }
 type Job struct {
 	ID, InvoiceID, SourceAttempt    string
 	Ordinal, Generation, Deliveries int
+	Mode                            string
+	ResolutionDeadline              int64
 }
 type Receipt struct {
 	AttemptID string `json:"attempt_id"`
@@ -71,13 +73,10 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db}
-	_, err = db.Exec(`PRAGMA journal_mode=WAL;
- CREATE TABLE IF NOT EXISTS invoices(id TEXT PRIMARY KEY, current_attempt TEXT NOT NULL, state TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS attempts(id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id), ordinal INTEGER NOT NULL, status TEXT NOT NULL, code TEXT NOT NULL, UNIQUE(invoice_id,ordinal));
- CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, payload TEXT NOT NULL, received_at INTEGER NOT NULL);
- CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id), source_attempt TEXT NOT NULL UNIQUE REFERENCES attempts(id), ordinal INTEGER NOT NULL, due_at INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('queued','leased','done')), lease_until INTEGER NOT NULL DEFAULT 0, generation INTEGER NOT NULL DEFAULT 0, deliveries INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '');
- CREATE INDEX IF NOT EXISTS jobs_due ON jobs(state,due_at,lease_until);
- CREATE TABLE IF NOT EXISTS gateway_receipts(idempotency_key TEXT PRIMARY KEY, invoice_id TEXT NOT NULL, attempt_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL, code TEXT NOT NULL);`)
+	_, err = db.Exec("PRAGMA journal_mode=WAL")
+	if err == nil {
+		err = s.migrate(context.Background())
+	}
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -138,61 +137,11 @@ func recordOutcome(ctx context.Context, c *sql.Conn, invoice, attempt, status, c
 	return nil
 }
 
-// A delivery ID and a business attempt ID are separate deduplication boundaries.
-func (s *Store) Ingest(ctx context.Context, e Event, now time.Time) (bool, error) {
-	if err := e.Validate(); err != nil {
-		return false, err
-	}
-	payload, _ := json.Marshal(e)
-	duplicate := false
-	err := s.write(ctx, func(c *sql.Conn) error {
-		var previous string
-		err := c.QueryRowContext(ctx, "SELECT payload FROM events WHERE id=?", e.EventID).Scan(&previous)
-		if err == nil {
-			if previous != string(payload) {
-				return ErrConflict
-			}
-			duplicate = true
-			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		var invoice, status, code string
-		err = c.QueryRowContext(ctx, "SELECT invoice_id,status,code FROM attempts WHERE id=?", e.AttemptID).Scan(&invoice, &status, &code)
-		if err == nil {
-			if invoice != e.InvoiceID || status != e.Status || code != e.Code {
-				return ErrConflict
-			}
-		} else if errors.Is(err, sql.ErrNoRows) {
-			var exists int
-			if err = c.QueryRowContext(ctx, "SELECT count(*) FROM invoices WHERE id=?", e.InvoiceID).Scan(&exists); err != nil {
-				return err
-			}
-			// This demo owns all retries after the initial terminal event. Unknown later attempts are quarantined.
-			if exists != 0 {
-				return ErrConflict
-			}
-			if _, err = c.ExecContext(ctx, "INSERT INTO invoices VALUES(?,?,?)", e.InvoiceID, e.AttemptID, "new"); err != nil {
-				return err
-			}
-			if err = recordOutcome(ctx, c, e.InvoiceID, e.AttemptID, e.Status, e.Code, 0, now); err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-		_, err = c.ExecContext(ctx, "INSERT INTO events VALUES(?,?,?)", e.EventID, string(payload), now.UnixMilli())
-		return err
-	})
-	return duplicate, err
-}
-
 func (s *Store) Claim(ctx context.Context, now time.Time) (*Job, error) {
 	var j Job
-	err := s.db.QueryRowContext(ctx, `UPDATE jobs SET state='leased',lease_until=?,generation=generation+1,deliveries=deliveries+1
+	err := s.db.QueryRowContext(ctx, `UPDATE jobs SET mode=CASE WHEN state='leased' THEN 'reconcile' ELSE mode END, state='leased',lease_until=?,generation=generation+1,deliveries=deliveries+1,resolution_deadline=CASE WHEN resolution_deadline=0 THEN ? ELSE resolution_deadline END
  WHERE id=(SELECT id FROM jobs WHERE (state='queued' AND due_at<=?) OR (state='leased' AND lease_until<=?) ORDER BY due_at,id LIMIT 1)
- RETURNING id,invoice_id,source_attempt,ordinal,generation,deliveries`, now.Add(LeaseDuration).UnixMilli(), now.UnixMilli(), now.UnixMilli()).Scan(&j.ID, &j.InvoiceID, &j.SourceAttempt, &j.Ordinal, &j.Generation, &j.Deliveries)
+ RETURNING id,invoice_id,source_attempt,ordinal,generation,deliveries,mode,resolution_deadline`, now.Add(LeaseDuration).UnixMilli(), now.Add(ResolutionWindow).UnixMilli(), now.UnixMilli(), now.UnixMilli()).Scan(&j.ID, &j.InvoiceID, &j.SourceAttempt, &j.Ordinal, &j.Generation, &j.Deliveries, &j.Mode, &j.ResolutionDeadline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -226,9 +175,28 @@ func (s *Store) Finish(ctx context.Context, j Job, r Receipt, now time.Time) err
 }
 
 func (s *Store) Release(ctx context.Context, j Job, now time.Time) error {
-	// Ambiguous provider failures retry the same job/key; they never become declines.
-	delay := time.Second * time.Duration(1<<uint(min(j.Deliveries, 8)))
-	result, err := s.db.ExecContext(ctx, "UPDATE jobs SET state='queued',due_at=?,last_error='provider result unknown; retry same key' WHERE id=? AND state='leased' AND generation=? AND lease_until>?", now.Add(delay).UnixMilli(), j.ID, j.Generation, now.UnixMilli())
+	return s.Reschedule(ctx, j, "reconcile", "provider_result_unknown", 0, now)
+}
+
+func (s *Store) CheckLease(ctx context.Context, j Job, now time.Time) error {
+	var valid int
+	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM jobs WHERE id=? AND generation=? AND state='leased' AND lease_until>?", j.ID, j.Generation, now.UnixMilli()).Scan(&valid)
+	if err != nil {
+		return err
+	}
+	if valid != 1 {
+		return ErrStaleLease
+	}
+	return nil
+}
+
+func (s *Store) Reschedule(ctx context.Context, j Job, mode, reason string, retryAfter time.Duration, now time.Time) error {
+	if mode != "recover" && mode != "reconcile" {
+		return errors.New("invalid job mode")
+	}
+	delay := max(time.Second*time.Duration(1<<uint(min(j.Deliveries, 8))), retryAfter)
+	due := min(now.Add(delay).UnixMilli(), j.ResolutionDeadline)
+	result, err := s.db.ExecContext(ctx, "UPDATE jobs SET state='queued',due_at=?,mode=?,last_error=? WHERE id=? AND state='leased' AND generation=? AND lease_until>?", due, mode, reason, j.ID, j.Generation, now.UnixMilli())
 	if err != nil {
 		return err
 	}
@@ -242,6 +210,24 @@ func (s *Store) Release(ctx context.Context, j Job, now time.Time) error {
 	return nil
 }
 
+func (s *Store) Review(ctx context.Context, j Job, reason string, now time.Time) error {
+	return s.write(ctx, func(c *sql.Conn) error {
+		r, err := c.ExecContext(ctx, "UPDATE jobs SET state='needs_review',last_error=? WHERE id=? AND state='leased' AND generation=? AND lease_until>?", reason, j.ID, j.Generation, now.UnixMilli())
+		if err != nil {
+			return err
+		}
+		n, err := r.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrStaleLease
+		}
+		_, err = c.ExecContext(ctx, "UPDATE invoices SET state='manual_review' WHERE id=? AND state!='paid'", j.InvoiceID)
+		return err
+	})
+}
+
 type Invoice struct {
 	ID             string `json:"id"`
 	State          string `json:"state"`
@@ -252,7 +238,9 @@ type Snapshot struct {
 	Attempts        int       `json:"payment_attempts"`
 	Jobs            int       `json:"retry_jobs"`
 	Pending         int       `json:"pending_jobs"`
-	ProviderEffects int       `json:"simulated_provider_effects"`
+	ProviderEffects int       `json:"legacy_provider_receipts"`
+	ReviewJobs      int       `json:"review_jobs"`
+	InboxReview     int       `json:"inbox_needs_review"`
 	Invoices        []Invoice `json:"invoices"`
 }
 
@@ -272,7 +260,13 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 			return out, err
 		}
 	}
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM jobs WHERE state!='done'").Scan(&out.Pending); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM jobs WHERE state IN ('queued','leased')").Scan(&out.Pending); err != nil {
+		return out, err
+	}
+	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM jobs WHERE state='needs_review'").Scan(&out.ReviewJobs); err != nil {
+		return out, err
+	}
+	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM inbox WHERE status='needs_review'").Scan(&out.InboxReview); err != nil {
 		return out, err
 	}
 	rows, err := tx.QueryContext(ctx, "SELECT id,state,current_attempt FROM invoices ORDER BY id")
