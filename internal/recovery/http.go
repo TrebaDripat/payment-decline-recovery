@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -25,6 +26,17 @@ func Handler(s *Store, secret string, now func() time.Time) (http.Handler, error
 		return nil, errors.New("webhook secret must contain at least 16 bytes")
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		metrics, err := s.Metrics(ctx, now())
+		if err != nil {
+			http.Error(w, "metrics storage unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_, _ = io.WriteString(w, metrics)
+	})
 	mux.HandleFunc("POST /webhooks", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
 		if err != nil {

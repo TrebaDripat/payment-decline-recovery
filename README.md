@@ -162,6 +162,9 @@ The worker now uses HTTP; `-outcome` belongs to `provider`. Webhook conflicts ch
 
 ## Verification
 
+`GET /metrics` provides durable Prometheus counters and queue gauges across all
+worker processes. See [metric meanings and scrape configuration](docs/metrics.md).
+
 ```sh
 go vet ./...
 go test -race -count=1 -cover ./...
