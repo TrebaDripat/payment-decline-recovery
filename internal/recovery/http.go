@@ -61,16 +61,32 @@ func Handler(s *Store, secret string, now func() time.Time) (http.Handler, error
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		duplicate, err := s.Ingest(r.Context(), event, now())
-		if errors.Is(err, ErrConflict) {
-			http.Error(w, "event conflicts with recorded attempt", http.StatusConflict)
-			return
-		}
+		result, err := s.Ingest(r.Context(), event, now())
 		if err != nil {
 			http.Error(w, "storage temporarily unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		writeJSON(w, map[string]bool{"accepted": true, "duplicate_delivery": duplicate})
+		w.Header().Set("Content-Type", "application/json")
+		if result.Status == "needs_review" {
+			w.WriteHeader(http.StatusAccepted)
+		}
+		writeJSON(w, result)
+	})
+	mux.HandleFunc("GET /inbox", func(w http.ResponseWriter, r *http.Request) {
+		entries, err := s.Inbox(r.Context())
+		if err != nil {
+			http.Error(w, "storage unavailable", 503)
+			return
+		}
+		writeJSON(w, entries)
+	})
+	mux.HandleFunc("GET /reviews", func(w http.ResponseWriter, r *http.Request) {
+		entries, err := s.Reviews(r.Context())
+		if err != nil {
+			http.Error(w, "storage unavailable", 503)
+			return
+		}
+		writeJSON(w, entries)
 	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		if s.Ping(r.Context()) != nil {

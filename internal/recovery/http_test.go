@@ -82,7 +82,14 @@ func TestHTTPRedeliveryAndConflict(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	e.Code = "lost_card"
-	if w := send(e); w.Code != 409 {
+	if w := send(e); w.Code != 202 || !strings.Contains(w.Body.String(), `"status":"needs_review"`) {
 		t.Fatalf("got %d", w.Code)
+	}
+	entries, err := s.Inbox(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || snapshot(t, s).InboxReview != 1 {
+		t.Fatalf("missing persisted conflict: %+v", entries)
 	}
 }
