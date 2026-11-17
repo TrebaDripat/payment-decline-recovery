@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/TrebaDripat/payment-decline-recovery/internal/apidocs"
 )
 
 func Signature(secret, timestamp string, body []byte) string {
@@ -26,6 +28,7 @@ func Handler(s *Store, secret string, now func() time.Time) (http.Handler, error
 		return nil, errors.New("webhook secret must contain at least 16 bytes")
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /openapi.json", apidocs.Engine)
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()

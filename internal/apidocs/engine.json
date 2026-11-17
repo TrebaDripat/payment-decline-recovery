@@ -1,0 +1,574 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Payment Decline Recovery API",
+    "version": "0.2.0",
+    "description": "Synthetic local portfolio demo. Diagnostic GET endpoints have no authentication and are intended for loopback or a trusted private network. Schemas describe accepted payloads; the implementation also enforces raw-byte limits and signature verification."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8080"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Check engine database connectivity",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "ok",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/snapshot": {
+      "get": {
+        "operationId": "snapshot",
+        "summary": "Read one consistent engine snapshot",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/inbox": {
+      "get": {
+        "operationId": "inbox",
+        "summary": "Read at most 100 canonical payload variants, newest last-received first",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InboxEntry"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reviews": {
+      "get": {
+        "operationId": "reviews",
+        "summary": "Read at most 100 paused jobs ordered by ID; no approval or resume operation",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewJob"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "metrics",
+        "summary": "Read durable Prometheus metrics for the shared engine database",
+        "description": "Text exposition format 0.0.4, bounded enum labels. Includes all workers. Read in one transaction with a three-second context deadline; returns 503 if storage fails. These counters are not provider-effect counts.",
+        "responses": {
+          "200": {
+            "description": "Prometheus text format",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Metrics storage unavailable",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "summary": "Read this embedded OpenAPI contract",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks": {
+      "post": {
+        "operationId": "ingestWebhook",
+        "summary": "Journal a signed terminal payment event",
+        "description": "HMAC-SHA256 over the timestamp header bytes, a period, and the exact raw request body. Encode the MAC as hexadecimal. Timestamp must be within 300 seconds of server time; sign every redelivery with a current timestamp. Secret must have at least 16 bytes. Validation precedes journaling. No real card data is accepted.",
+        "security": [
+          {
+            "WebhookSignature": [],
+            "WebhookTimestamp": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Webhook-Timestamp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$"
+            },
+            "description": "Current Unix time in seconds."
+          },
+          {
+            "name": "X-Webhook-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-fA-F0-9]{64}$"
+            },
+            "description": "Hex HMAC-SHA256; not a fixed API token."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Event"
+              },
+              "example": {
+                "event_id": "delivery-1",
+                "invoice_id": "synthetic-invoice",
+                "attempt_id": "initial-attempt",
+                "status": "failed",
+                "code": "insufficient_funds"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Processed or duplicate event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResult"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Conflict persisted for manual review; affected active jobs are paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON, identifier, outcome, code or unknown field",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing signature or timestamp",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 65536 bytes or cannot be read",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage temporarily unavailable",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Identifier": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9_-]{1,96}$",
+        "minLength": 1,
+        "maxLength": 96
+      },
+      "Event": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "invoice_id",
+          "attempt_id",
+          "status"
+        ],
+        "properties": {
+          "event_id": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "invoice_id": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "attempt_id": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "failed",
+              "succeeded"
+            ]
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "failed"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "code"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "insufficient_funds",
+                    "do_not_honor",
+                    "lost_card"
+                  ]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "code": {
+                  "const": ""
+                }
+              }
+            }
+          }
+        ],
+        "description": "Exactly one JSON value; at most 65536 raw bytes. A failed terminal outcome requires a supported decline code; a succeeded outcome omits code or uses an empty string."
+      },
+      "IngestResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "duplicate_delivery"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "processed",
+              "duplicate",
+              "needs_review"
+            ]
+          },
+          "duplicate_delivery": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "description": "duplicate_delivery means the same event ID and canonical payload were journaled before. A new event ID for an existing attempt has status duplicate and duplicate_delivery false. Conflicts are durably acknowledged, not approved or applied as payment outcomes."
+      },
+      "Invoice": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "state",
+          "current_attempt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "paid",
+              "retry_scheduled",
+              "manual_review",
+              "exhausted"
+            ]
+          },
+          "current_attempt": {
+            "$ref": "#/components/schemas/Identifier"
+          }
+        }
+      },
+      "Snapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "webhook_events",
+          "payment_attempts",
+          "retry_jobs",
+          "pending_jobs",
+          "legacy_provider_receipts",
+          "review_jobs",
+          "inbox_needs_review",
+          "invoices"
+        ],
+        "properties": {
+          "webhook_events": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "payment_attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "retry_jobs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pending_jobs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "legacy_provider_receipts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "review_jobs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inbox_needs_review": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "invoices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Invoice"
+            }
+          }
+        }
+      },
+      "InboxEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "payload_hash",
+          "payload",
+          "status",
+          "reason",
+          "deliveries",
+          "first_received_unix_ms",
+          "last_received_unix_ms"
+        ],
+        "properties": {
+          "event_id": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "payload_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Event"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "processed",
+              "duplicate",
+              "needs_review"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "deliveries": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "first_received_unix_ms": {
+            "type": "integer"
+          },
+          "last_received_unix_ms": {
+            "type": "integer"
+          }
+        }
+      },
+      "ReviewJob": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "invoice_id",
+          "reason",
+          "mode",
+          "deliveries"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "invoice_id": {
+            "$ref": "#/components/schemas/Identifier"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "recover",
+              "reconcile"
+            ]
+          },
+          "deliveries": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "WebhookSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Webhook-Signature",
+        "description": "Per-request HMAC, not a reusable API key. Sign the raw bytes as documented on POST /webhooks."
+      },
+      "WebhookTimestamp": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Webhook-Timestamp",
+        "description": "Fresh Unix seconds bound into the request signature."
+      }
+    }
+  }
+}

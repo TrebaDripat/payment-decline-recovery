@@ -63,6 +63,8 @@ def main():
             compose("build", "api", timeout=600)
         compose("up", "--detach", "--no-build", "--wait", "--wait-timeout", "60", "--scale", "worker=2")
         assert get(api, "/health")["status"] == "ok"
+        assert get(api, "/openapi.json")["openapi"] == "3.1.0"
+        assert get(provider, "/openapi.json")["openapi"] == "3.1.0"
         assert send()["status"] == "processed"
         assert send()["duplicate_delivery"] is True
         # Exercise the real one-minute retry delay; no fixture DB edits here.

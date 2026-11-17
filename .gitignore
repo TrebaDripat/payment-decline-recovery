@@ -6,3 +6,4 @@
 .env
 /benchmark-local.json
 __pycache__/
+/.venv/

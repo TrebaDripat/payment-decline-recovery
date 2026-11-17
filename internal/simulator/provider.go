@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/TrebaDripat/payment-decline-recovery/internal/apidocs"
 	"github.com/TrebaDripat/payment-decline-recovery/internal/recovery"
 	_ "modernc.org/sqlite"
 )
@@ -110,6 +111,7 @@ func Handler(s *Store, options Options) (http.Handler, error) {
 		options.Delay = 10 * time.Second
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /openapi.json", apidocs.Provider)
 	mux.HandleFunc("POST /recoveries", func(w http.ResponseWriter, r *http.Request) {
 		var request recovery.RecoveryRequest
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))

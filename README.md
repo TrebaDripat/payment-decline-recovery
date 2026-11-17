@@ -132,6 +132,10 @@ The first job becomes due after one minute. The `demo` command avoids waiting by
 
 ## HTTP contract
 
+Both services serve an embedded OpenAPI 3.1 document at `GET /openapi.json`.
+See [the contracts and executable validation](docs/api.md) for schemas and error
+responses, including the simulator's authoritative lookup contract.
+
 `POST /webhooks` accepts exactly one JSON object:
 
 ```json
@@ -192,6 +196,8 @@ See [verification results](docs/verification.md) for commands actually run and t
 - `internal/recovery/inbox.go`: durable event decisions and review inspection.
 - `internal/recovery/migrate.go`: atomic migration from the initial database format.
 - `internal/recovery/http.go`: webhook authentication and HTTP boundary.
+- `internal/recovery/metrics.go`: consistent, durable Prometheus aggregates.
+- `internal/apidocs/`: embedded engine/provider OpenAPI contracts.
 - `internal/simulator/`: independent HTTP simulator and real-process crash tests.
 - `internal/httpserver/`: bounded graceful shutdown and active-request tests.
 - `cmd/recovery/`: API, provider, worker, diagnostics and HTTP reconciliation demo.
