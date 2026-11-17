@@ -165,6 +165,10 @@ The worker now uses HTTP; `-outcome` belongs to `provider`. Webhook conflicts ch
 `GET /metrics` provides durable Prometheus counters and queue gauges across all
 worker processes. See [metric meanings and scrape configuration](docs/metrics.md).
 
+Run `python3 scripts/benchmark.py` after building for measured webhook latency and
+one-versus-four-worker throughput with correctness assertions. See the
+[benchmark methodology](docs/benchmark.md) before interpreting the results.
+
 ```sh
 go vet ./...
 go test -race -count=1 -cover ./...

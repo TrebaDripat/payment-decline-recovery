@@ -17,3 +17,4 @@ jobs:
       - run: go build -o bin/recovery ./cmd/recovery
       - run: ./bin/recovery demo
       - run: python3 scripts/smoke.py
+      - run: python3 scripts/benchmark.py --invoices 8 --workers 1,2 --runs 1
