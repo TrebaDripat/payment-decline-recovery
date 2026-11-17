@@ -18,3 +18,9 @@ jobs:
       - run: ./bin/recovery demo
       - run: python3 scripts/smoke.py
       - run: python3 scripts/benchmark.py --invoices 8 --workers 1,2 --runs 1
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/compose_smoke.py

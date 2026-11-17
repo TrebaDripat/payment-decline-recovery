@@ -91,6 +91,9 @@ Use `recovery reviews` and `recovery inbox` to inspect paused jobs and conflicti
 
 ## Run API and independent workers
 
+For a containerized setup with persistent engine/provider volumes and health
+checks, use the [Docker Compose walkthrough](docs/docker.md).
+
 Build once, then start the synthetic provider in the first terminal:
 
 ```sh
